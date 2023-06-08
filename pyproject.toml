@@ -1,0 +1,30 @@
+[build-system]
+requires = ["flit_core >=3.2,<4"]
+build-backend = "flit_core.buildapi"
+
+[project]
+name = "arraylib"
+authors = [{name = "Nicolas Tessore", email = "n.tessore@ucl.ac.uk"}]
+description = "Library for array computing"
+readme = "README.md"
+license = {file = "LICENSE"}
+classifiers = [
+    "License :: OSI Approved :: MIT License",
+]
+requires-python = ">=3.6"
+dynamic = ["version"]
+
+[project.optional-dependencies]
+test = ["pytest", "numpy"]
+docs = ["sphinx", "furo"]
+
+[project.urls]
+Home = "https://github.com/ntessore/arraylib"
+Documentation = "https://arraylib.readthedocs.io"
+Issues = "https://github.com/ntessore/arraylib/issues"
+
+[tool.flit.sdist]
+exclude = [".*", "docs"]
+
+[tool.pytest.ini_options]
+testpaths = ["arraylib"]

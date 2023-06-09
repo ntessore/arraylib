@@ -1,3 +1,4 @@
+import operator
 import random
 import pytest
 import arraylib
@@ -15,85 +16,153 @@ def _show(x):
         return f"{x.real!s}"
 
 
-def uniform(lower, upper, size, dtype):
+def mpfloat(dtype, func=None, /):
+    fp = xp.finfo(dtype)
+
+    def decorator(func):
+        @mp.workprec(fp.bits)
+        def wrapper(x):
+            with mp.extraprec(fp.bits):
+                y = func(mpf(str(x)))
+            return xp.asarray(str(y), dtype=dtype)
+        return wrapper
+
+    if func is None:
+        return decorator
+    return decorator(func)
+
+
+def mpcomplex(dtype, func=None, /):
+    fp = xp.finfo(dtype)
+
+    def decorator(func):
+        @mp.workprec(fp.bits)
+        def wrapper(z):
+            with mp.extraprec(fp.bits):
+                w = func(mpc(str(z.real), str(z.imag)))
+            return xp.asarray(str(w).replace(' ', ''), dtype=dtype)
+        return wrapper
+
+    if func is None:
+        return decorator
+    return decorator(func)
+
+
+def flim(dtype):
+    fp = xp.finfo(dtype)
+    four = xp.asarray(4, dtype=fp.dtype)
+    return four/fp.max, fp.max, fp.eps
+
+
+def uniform(lower, upper, size):
     delta = upper - lower
     return xp.asarray([lower + delta * random.random()
-                      for _ in range(size)], dtype=dtype)
+                      for _ in range(size)], dtype=delta.dtype)
 
 
-def loguniform(lower, upper, size, dtype, sign=True):
-    log_a, log_b = xp.log(lower), xp.log(upper)
-    orign = (log_a + log_b)/2
-    delta = log_b - log_a
-    x = [xp.exp(orign + delta*random.uniform(-0.5, 0.5))
-         for _ in range(size)]
+def loguniform(lower, upper, size, sign=True):
+    r = xp.exp(uniform(xp.log(lower), xp.log(upper), size))
     if sign:
-        x = [random.choice([-xi, xi]) for xi in x]
-    return xp.asarray(x, dtype=dtype)
+        s = xp.asarray([random.choice([-1, 1]) for _ in range(size)],
+                       dtype=r.dtype)
+    else:
+        s = xp.asarray(1, dtype=r.dtype)
+    return s*r
+
+
+def assert_op(op, a, b):
+    __tracebackhide__ = True
+    result = op(a, b)
+    if not xp.all(result):
+        bad_n = xp.sum(~result, axis=None)
+        bad_a = a[~result][0]
+        bad_b = b[~result][0]
+        msg = (f"a not {op.__name__} b [{bad_n}/{result.size}]\n"
+               f"{_show(bad_a)} not {op.__name__} {_show(bad_b)}")
+        raise AssertionError(msg)
+
+
+def assert_eq(a, b):
+    assert_op(operator.eq, a, b)
+
+
+def assert_gt(a, b):
+    assert_op(operator.gt, a, b)
 
 
 def assert_fn_equal(name, z, got, expected, nulp=5):
     __tracebackhide__ = True
     err = xp.abs(got - expected)/xp.ulp(expected)
-    min_err, max_err = xp.min(err), xp.max(err)
-    if max_err > nulp:
+    max_err = xp.max(err)
+    if not max_err <= nulp:
         bad = (err > nulp)
-        bad_n = xp.sum(bad)
-        bad_z = z[bad][0]
-        bad_got = got[bad][0]
-        bad_expected = expected[bad][0]
-        bad_err = err[bad][0]
-        msg = (f"result not equal to {nulp} ulp [{bad_n}/{z.size}, "
-               f"min={min_err:.0f}, max={max_err:.0f}]\n"
-               f"{name}({_show(bad_z)}) \n"
-               f"= {_show(bad_got)}\n"
-               f"≠ {_show(bad_expected)} [{bad_err:.0f} ulp]")
+        n = xp.sum(err > nulp)
+        msg = f"result not equal to {nulp} ulp [{n}/{z.size}]"
+        for i in range(min(n, 3)):
+            bad_z = z[bad][i]
+            bad_got = got[bad][i]
+            bad_expected = expected[bad][i]
+            bad_err = err[bad][i]
+            msg += (f"\n---"
+                    f"\n{name}({_show(bad_z)})"
+                    f"\n= {_show(bad_got)}"
+                    f"\n≠ {_show(bad_expected)} [{bad_err:.0f} ulp]")
         raise AssertionError(msg)
 
 
 @pytest.mark.parametrize("dtype", xp._dtypes.float)
 def test_sinpi_float(dtype):
-    fp = xp.finfo(dtype)
-    fmin, fmax = 4/fp.max, fp.max
+    fmin, fmax, feps = flim(dtype)
+    one = xp.asarray(1, dtype=dtype)
 
-    @mp.workprec(fp.bits*2)
+    @mpfloat(dtype)
     def f(x):
-        return mp.sinpi(mpf(str(x)))
+        return mp.sinpi(x)
 
-    xmin, xmax = fmin, fmax/xp.pi
+    assert xp.ulp(one/feps) == 1
 
-    x = loguniform(xmin, xmax, 1000, dtype)
+    x = loguniform(fmin, one/feps, 1000)
 
-    expected = xp.asarray(list(map(f, x)), dtype=dtype)
+    expected = xp.asarray([f(xi) for xi in x], dtype=dtype)
+
+    assert x.dtype == dtype
     got = xp.sinpi(x)
+    assert got.dtype == dtype
+
     assert_fn_equal("sinpi", x, got, expected)
 
 
 @pytest.mark.parametrize("dtype", xp._dtypes.complex)
 def test_sinpi_complex(dtype):
-    fp = xp.finfo(dtype)
-    fmin, fmax = 4/fp.max, fp.max
+    fmin, fmax, feps = flim(dtype)
+    one = xp.asarray(1, dtype=dtype)
+    pi = xp.PI(dtype)
+    j = xp.asarray(1j, dtype=dtype)
 
-    @mp.workprec(fp.bits*2)
-    def f(x):
-        return mp.sinpi(mpc(str(x.real), str(x.imag)))
+    @mpcomplex(dtype)
+    def f(z):
+        return mp.sinpi(z)
 
-    xmin, xmax = fmin, fmax/xp.pi
-    ymin, ymax = fmin, xp.asinh(fmax)/xp.pi
+    assert xp.ulp(one/feps) == 1
 
-    x = loguniform(xmin, xmax, 1000, dtype)
-    y = loguniform(ymin, ymax, 1000, dtype)
-    z = x + xp.asarray(1j, dtype=dtype)*y
+    x = loguniform(fmin, one/feps, 1000)
+    y = loguniform(fmin, xp.asinh(fmax)/pi, 1000)
+    z = x + j*y
 
-    expected = xp.asarray(list(map(f, z)), dtype=dtype)
+    expected = xp.asarray([f(zi) for zi in z], dtype=dtype)
+
+    assert z.dtype == dtype
     got = xp.sinpi(z)
+    assert got.dtype == dtype
+
     assert_fn_equal("sinpi", z, got, expected)
 
 
 @pytest.mark.parametrize("dtype", xp._dtypes.float + xp._dtypes.complex)
 def test_ulp(dtype):
-    zero = xp.asarray(0, dtype)
-    one = xp.asarray(1, dtype)
+    zero = xp.asarray(0, dtype=dtype)
+    one = xp.asarray(1, dtype=dtype)
+    two = xp.asarray(2, dtype=dtype)
     inf = xp.asarray("inf", dtype=dtype)
     nan = xp.asarray("nan", dtype=dtype)
 
@@ -105,10 +174,16 @@ def test_ulp(dtype):
 
     assert xp.ulp(zero) > 0
 
-    assert xp.isinf(xp.ulp(inf))
-    assert xp.isinf(xp.ulp(-inf))
+    assert xp.ulp(inf) == inf
+    assert xp.ulp(-inf) == inf
 
     assert xp.isnan(xp.ulp(nan))
+
+    x = loguniform(two*two/fp.max, fp.max, 1000)
+    u = xp.ulp(x)
+
+    assert_gt(x + u, x)
+    assert_eq(x + u/two/two, x)
 
 
 @pytest.mark.parametrize("dtype", [float, complex])

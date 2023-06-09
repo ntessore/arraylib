@@ -43,7 +43,7 @@ def bind(xp, /, **aliases):
 
     """
     from types import FunctionType
-    # globals for the new module
+    # globals for the new namespace
     ns = {
         "__builtins__": __builtins__,
     }
@@ -63,7 +63,7 @@ def bind(xp, /, **aliases):
     # store the dtypes summary information
     ns["_dtypes"] = type(lib._dtypes)(*dtypes)
     # load the library
-    for name in lib.__all__:
+    for name in lib._export:
         # skip arraylib meta-functions
         if name in ("bind",):
             continue

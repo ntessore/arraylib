@@ -26,7 +26,7 @@
 .. autofunction::   max
 .. autofunction::   min
 .. autofunction::   modf
-.. autodata::       PI
+.. autofunction::   PI
 .. autodata::       pi
 .. autofunction::   round
 .. autofunction::   sign
@@ -105,12 +105,13 @@ def _alias(*names: str):
     return decorator
 
 
-def _const(name, value):
+def _const(name, value, hint):
     """Make function returning a constant in a given dtype."""
-    def constfn(dtype):
+    def constfn(dtype: dtype, /):
         return asarray(value, dtype=dtype)
     constfn.__name__ = name
     constfn.__qualname__ = name
+    constfn.__annotations__['return'] = hint
     constfn.__doc__ = f"Return *{name}* with the given dtype."
     return constfn
 
@@ -426,7 +427,7 @@ def modf(z: float|complex) -> float|complex:
 
 
 # requires decimals to convert to the widest floating point type
-PI = _const("PI", "3.1415926535897932384626433832795028841971693993751")
+PI = _const("PI", "3.1415926535897932384626433832795028841971693993751", float)
 PI.__doc__ = """Return the constant *π* in the given dtype.
 
 .. versionchanged:: 0.1.0
